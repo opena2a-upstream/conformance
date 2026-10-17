@@ -41,57 +41,87 @@ runs:
 
     - name: Build conformance tests
       shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        cd "${{ github.action_path }}"
+        cd "$ACTION_PATH"
         npm ci
         npm run build
 
     - name: Run conformance tests
       shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_URL: ${{ inputs.url }}
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_EXPECTED_FAILURES: ${{ inputs.expected-failures }}
+        INPUT_SUITE: ${{ inputs.suite }}
+        INPUT_SCENARIO: ${{ inputs.scenario }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_VERBOSE: ${{ inputs.verbose }}
       run: |
-        CONFORMANCE="${{ github.action_path }}/dist/index.js"
+        CONFORMANCE="$ACTION_PATH/dist/index.js"
 
-        # Build the command arguments
-        ARGS="${{ inputs.mode }}"
+        # Build the command arguments; each input is one argument
+        ARGS=("$INPUT_MODE")
 
         # Mode-specific required options
-        if [ "${{ inputs.mode }}" = "server" ]; then
-          if [ -z "${{ inputs.url }}" ]; then
-            echo "::error::The 'url' input is required for server mode"
-            exit 1
-          fi
-          ARGS="${ARGS} --url ${{ inputs.url }}"
-        elif [ "${{ inputs.mode }}" = "client" ]; then
-          if [ -z "${{ inputs.command }}" ]; then
-            echo "::error::The 'command' input is required for client mode"
-            exit 1
-          fi
-          ARGS="${ARGS} --command '${{ inputs.command }}'"
-        else
-          echo "::error::Invalid mode '${{ inputs.mode }}'. Must be 'server' or 'client'."
-          exit 1
-        fi
+        case "$INPUT_MODE" in
+          server)
+            if [ -z "$INPUT_URL" ]; then
+              echo "::error::The 'url' input is required for server mode"
+              exit 1
+            fi
+            ARGS+=(--url "$INPUT_URL")
+            ;;
+          client)
+            if [ -z "$INPUT_COMMAND" ]; then
+              echo "::error::The 'command' input is required for client mode"
+              exit 1
+            fi
+            ARGS+=(--command "$INPUT_COMMAND")
+            ;;
+          *)
+            echo "::error::Invalid mode '$INPUT_MODE'. Must be 'server' or 'client'."
+            exit 2
+            ;;
+        esac
 
         # Optional arguments
-        if [ -n "${{ inputs.expected-failures }}" ]; then
-          ARGS="${ARGS} --expected-failures ${{ inputs.expected-failures }}"
+        if [ -n "$INPUT_EXPECTED_FAILURES" ]; then
+          ARGS+=(--expected-failures "$INPUT_EXPECTED_FAILURES")
         fi
 
-        if [ -n "${{ inputs.suite }}" ]; then
-          ARGS="${ARGS} --suite ${{ inputs.suite }}"
+        if [ -n "$INPUT_SUITE" ]; then
+          ARGS+=(--suite "$INPUT_SUITE")
         fi
 
-        if [ -n "${{ inputs.scenario }}" ]; then
-          ARGS="${ARGS} --scenario ${{ inputs.scenario }}"
+        if [ -n "$INPUT_SCENARIO" ]; then
+          ARGS+=(--scenario "$INPUT_SCENARIO")
         fi
 
-        if [ "${{ inputs.mode }}" = "client" ]; then
-          ARGS="${ARGS} --timeout ${{ inputs.timeout }}"
+        if [ "$INPUT_MODE" = "client" ]; then
+          case "$INPUT_TIMEOUT" in
+            '' | *[!0-9]*)
+              echo "::error::Invalid timeout '$INPUT_TIMEOUT'. Must be a number of milliseconds."
+              exit 2
+              ;;
+          esac
+          ARGS+=(--timeout "$INPUT_TIMEOUT")
         fi
 
-        if [ "${{ inputs.verbose }}" = "true" ]; then
-          ARGS="${ARGS} --verbose"
-        fi
+        case "$INPUT_VERBOSE" in
+          true)
+            ARGS+=(--verbose)
+            ;;
+          false | '')
+            ;;
+          *)
+            echo "::error::Invalid verbose '$INPUT_VERBOSE'. Must be 'true' or 'false'."
+            exit 2
+            ;;
+        esac
 
-        echo "Running: node ${CONFORMANCE} ${ARGS}"
-        eval "node ${CONFORMANCE} ${ARGS}"
+        echo "Running: node $CONFORMANCE ${ARGS[*]}"
+        node "$CONFORMANCE" "${ARGS[@]}"
